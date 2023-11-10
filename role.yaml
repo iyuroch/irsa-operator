@@ -1,0 +1,16 @@
+apiVersion: auth.irsa.aws/v1alpha1
+kind: Role
+metadata:
+  name: example-role
+spec:
+  description: "Example Role for IRSA"
+  statements:
+    - Action:
+        - "s3:GetObject"
+      Effect: "Allow"
+      Resource: "arn:aws:s3:::example-bucket/*"
+status:
+  appliedpolicy: ""
+  reconciled: false
+  role: ""
+

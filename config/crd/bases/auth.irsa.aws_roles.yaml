@@ -1,0 +1,83 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.11.1
+  creationTimestamp: null
+  name: roles.auth.irsa.aws
+spec:
+  group: auth.irsa.aws
+  names:
+    kind: Role
+    listKind: RoleList
+    plural: roles
+    singular: role
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Role is the Schema for the roles API
+        properties:
+          apiVersion:
+            description: 'APIVersion defines the versioned schema of this representation
+              of an object. Servers should convert recognized schemas to the latest
+              internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+            type: string
+          kind:
+            description: 'Kind is a string value representing the REST resource this
+              object represents. Servers may infer this from the endpoint the client
+              submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: RoleSpec defines the desired state of Role
+            properties:
+              description:
+                type: string
+              statements:
+                items:
+                  description: StatementEntry provides struct for iam statement
+                  properties:
+                    Action:
+                      items:
+                        type: string
+                      type: array
+                    Effect:
+                      type: string
+                    Resource:
+                      type: string
+                  required:
+                  - Action
+                  - Effect
+                  - Resource
+                  type: object
+                minItems: 1
+                type: array
+            required:
+            - statements
+            type: object
+          status:
+            description: RoleStatus defines the observed state of Role
+            properties:
+              appliedpolicy:
+                description: stores marshaled last applied policy
+                type: string
+              policyarn:
+                type: string
+              reconciled:
+                type: boolean
+              role:
+                description: stores role name which is sa + namespace + cluster name
+                  + md5 hash
+                type: string
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
