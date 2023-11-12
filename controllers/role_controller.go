@@ -54,7 +54,6 @@ type RoleReconciler struct {
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.14.1/pkg/reconcile
 func (r *RoleReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
-	// logger.Info("request for: %s", req.String())
 
 	role := &authv1alpha1.Role{}
 
@@ -72,7 +71,7 @@ func (r *RoleReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	// Printout the duration of the reconciliation, independent if the reconciliation was successful or had an error.
 	startTime := time.Now()
 	defer func() {
-		roleLog.Info("Reconciliation run finished", "duration_seconds", time.Since(startTime).Seconds())
+		roleLog.Info("reconciliation run finished", "duration_seconds", time.Since(startTime).Seconds())
 	}()
 
 	// reconcile here
@@ -85,34 +84,92 @@ func (r *RoleReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	// if deletion => delete policy in aws
 
 	// https://groups.google.com/g/kubernetes-sig-architecture/c/mVGobfD4TpY/m/nkdbkX1iBwAJ
-	// TODO: fix me with cluster uid
-	policyName := aws.GeneratePolicyName(role.Name, role.Namespace, "uid-cluster")
+	// TODO: fix me with object uid
+	awsResourceName := aws.GenerateResourceName(role.Name, role.Namespace, "uid-cluster")
+	roleLog.Info(fmt.Sprintf("aws resource name: %s", awsResourceName))
 
 	roleLog.Info(fmt.Sprintf("policy statements: %s", role.Spec.Statements))
 
-	policyDoc, err := aws.GeneratePolicy(&role.Spec.Statements)
+	policyDoc, err := aws.GeneratePolicyDocument(&role.Spec.Statements)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 
 	roleLog.Info(fmt.Sprintf("creating policy document: %s", *policyDoc))
 
+	// it means that policy not created
 	if role.Status.PolicyARN == "" {
-		roleLog.V(1).Info("creating policy here")
-		policyARN, err := r.IAMReconciler.CreatePolicy(ctx, policyName, policyDoc)
+		roleLog.Info("creating policy")
+		policyARN, err := r.IAMReconciler.CreatePolicy(ctx, awsResourceName, policyDoc)
 		if err != nil {
 			roleLog.Error(err, "failed to create policy")
 			// TODO: replace with reconcile calls
 			return ctrl.Result{}, err
 		}
 		// refreshing version here so less likely to conflict on update
-		if r.Get(ctx, req.NamespacedName, role) != nil {
+		if err := r.Get(ctx, req.NamespacedName, role); err != nil {
 			return ctrl.Result{}, err
 		}
 		role.Status.PolicyARN = policyARN
-		roleLog.Info("updating status")
-		if r.Status().Update(ctx, role) != nil {
-			roleLog.Info("updating status failed")
+		roleLog.Info("updating status with policyARN")
+		if err := r.Status().Update(ctx, role); err != nil {
+			roleLog.Error(err, "updating status failed")
+			// in some cases there will be conflict so requeue
+			return ctrl.Result{}, err
+		}
+	}
+
+	roleLog.Info("checking if policy doc matches state")
+	if role.Status.AppliedPolicyDocument != *policyDoc {
+		roleLog.Info("updating policy document")
+		if r.IAMReconciler.UpdatePolicyDocument(ctx, role.Status.PolicyARN, policyDoc) != nil {
+			roleLog.Error(err, "cannot update policy document")
+			return ctrl.Result{}, err
+		}
+		if err := r.Get(ctx, req.NamespacedName, role); err != nil {
+			return ctrl.Result{}, err
+		}
+		role.Status.AppliedPolicyDocument = *policyDoc
+		if err := r.Status().Update(ctx, role); err != nil {
+			roleLog.Error(err, "updating applied policy document failed")
+			// in some cases there will be conflict so requeue
+			return ctrl.Result{}, err
+		}
+	}
+
+	roleLog.Info("checking if role name matches state")
+	if role.Status.RoleName == "" {
+		roleLog.Info("creating role")
+		if r.IAMReconciler.CreateRole(ctx, role.Namespace, role.Name,
+			awsResourceName, role.Spec.OIDCProvider) != nil {
+			return ctrl.Result{}, err
+		}
+
+		if err := r.Get(ctx, req.NamespacedName, role); err != nil {
+			return ctrl.Result{}, err
+		}
+		role.Status.RoleName = awsResourceName
+		if err := r.Status().Update(ctx, role); err != nil {
+			roleLog.Error(err, "updating rolename failed")
+			// in some cases there will be conflict so requeue
+			return ctrl.Result{}, err
+		}
+	}
+
+	roleLog.Info("checking policy is bound to role")
+	if !role.Status.RolePolicyBound {
+		roleLog.Info("binding policy to role")
+		if r.IAMReconciler.RolePolicyBind(ctx, role.Status.PolicyARN, role.Status.RoleName) != nil {
+			return ctrl.Result{}, err
+		}
+
+		// TODO: move this to separate function
+		if err := r.Get(ctx, req.NamespacedName, role); err != nil {
+			return ctrl.Result{}, err
+		}
+		role.Status.RolePolicyBound = true
+		if err := r.Status().Update(ctx, role); err != nil {
+			roleLog.Error(err, "updating role policy bind failed")
 			// in some cases there will be conflict so requeue
 			return ctrl.Result{}, err
 		}

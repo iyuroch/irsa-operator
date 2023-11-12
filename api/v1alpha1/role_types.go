@@ -24,18 +24,21 @@ import (
 // RoleSpec defines the desired state of Role
 type RoleSpec struct {
 	// +kubebuilder:validation:MinItems:=1
-	Statements  []aws.StatementEntry `json:"statements"`
-	Description string               `json:"description,omitempty"`
+	Statements []aws.StatementEntry `json:"statements"`
+	// provide oidc provider you created for eks cluster
+	// https://docs.aws.amazon.com/eks/latest/userguide/enable-iam-roles-for-service-accounts.html
+	OIDCProvider string `json:"oidcprovider"`
 }
 
 // RoleStatus defines the observed state of Role
 type RoleStatus struct {
 	Reconciled bool `json:"reconciled,omitempty"`
-	// stores marshaled last applied policy
-	AppliedPolicy string `json:"appliedpolicy,omitempty"`
+	// stores marshaled last applied policy document
+	AppliedPolicyDocument string `json:"appliedpolicydocument,omitempty"`
 	// stores role name which is sa + namespace + cluster name + md5 hash
-	Role      string `json:"role,omitempty"`
-	PolicyARN string `json:"policyarn,omitempty"`
+	RoleName        string `json:"rolename,omitempty"`
+	PolicyARN       string `json:"policyarn,omitempty"`
+	RolePolicyBound bool   `json:"bound,omitempty"`
 }
 
 //+kubebuilder:object:root=true

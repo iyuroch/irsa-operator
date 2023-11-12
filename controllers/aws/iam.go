@@ -3,9 +3,12 @@ package aws
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/aws/aws-sdk-go-v2/service/iam"
+	"github.com/aws/aws-sdk-go-v2/service/iam/types"
+	"github.com/aws/aws-sdk-go/aws"
 )
 
 // +kubebuilder:object:generate=true
@@ -32,6 +35,11 @@ type IIAMReconciler interface {
 	CreatePolicy(ctx context.Context, name string,
 		policyDoc *string) (string, error)
 	Delete(ctx context.Context, name string) error
+	UpdatePolicyDocument(ctx context.Context, policyARN string,
+		policyDoc *string) error
+	CreateRole(ctx context.Context,
+		namespace string, serviceAccount string, name string, oidcProvider string) error
+	RolePolicyBind(ctx context.Context, policyArn string, roleName string) error
 }
 
 // IAMReconciler implement creation and deletion of the policy
@@ -41,10 +49,10 @@ type IAMReconciler struct {
 
 const policyVersion = "2012-10-17"
 
-// GeneratePolicy generates policy from passed name, description and statements
+// GeneratePolicyDocument generates policy from passed name, description and statements
 // it will return string representation of json which should match
 // https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies.html
-func GeneratePolicy(statementEntries *[]StatementEntry) (*string, error) {
+func GeneratePolicyDocument(statementEntries *[]StatementEntry) (*string, error) {
 	policy := PolicyDocument{
 		Version:   policyVersion,
 		Statement: *statementEntries,
@@ -59,9 +67,9 @@ func GeneratePolicy(statementEntries *[]StatementEntry) (*string, error) {
 	return &jsonString, nil
 }
 
-// GeneratePolicyName generates policy name
+// GenerateResourceName generates policy name
 // it should be unique in the AWS account
-func GeneratePolicyName(name string, namespace string, uid string) string {
+func GenerateResourceName(name string, namespace string, uid string) string {
 	return fmt.Sprintf("%s-%s-%s", name, namespace, uid)
 }
 
@@ -81,10 +89,61 @@ func (reconc *IAMReconciler) Delete(ctx context.Context, policyArn string) error
 	return nil
 }
 
-// CreatePolicy create policy according to provided name descipriton and statements
+// CreateRole create or retrieves policy according to provided name descipriton and statements
+// it will return wrapped error in case cannot generate
+func (reconc *IAMReconciler) CreateRole(ctx context.Context,
+	namespace string, serviceAccount string, name string, oidcProvider string) error {
+	accountId, err := GetAccountId()
+	if err != nil {
+		return err
+	}
+	policyDocument := fmt.Sprintf(`{
+		"Version": "2012-10-17",
+		"Statement": [
+			{
+				"Sid": "",
+				"Effect": "Allow",
+				"Principal": {
+					"Federated": "arn:aws:iam::%s:oidc-provider/%s"
+				},
+				"Action": "sts:AssumeRoleWithWebIdentity",
+				"Condition": {
+					"StringLike": {
+						"%s:sub": "system:serviceaccount:%s:%s"
+					}
+				}
+			}
+		]
+	}`, accountId, oidcProvider, oidcProvider, namespace, serviceAccount)
+
+	createRoleInput := &iam.CreateRoleInput{
+		AssumeRolePolicyDocument: aws.String(policyDocument),
+		RoleName:                 &name,
+	}
+
+	_, err = reconc.IAMClient.CreateRole(ctx, createRoleInput)
+	// check if role already exists, if error is not that it already exists
+	// there is other issue with creating role
+	var existsErr *types.EntityAlreadyExistsException
+	if !errors.As(err, &existsErr) {
+		return err
+	}
+
+	return nil
+}
+
+// CreatePolicy create or retrieves policy according to provided name descipriton and statements
 // it will return wrapped error in case cannot generate
 func (reconc *IAMReconciler) CreatePolicy(ctx context.Context, name string,
 	policyDoc *string) (policyArn string, err error) {
+
+	accountId, err := GetAccountId()
+	if err != nil {
+		return "", err
+	}
+
+	policyArn = fmt.Sprintf("arn:aws:iam::%s:policy/%s", accountId, name)
+
 	descr := defaultDescription
 	createPolicyInput := &iam.CreatePolicyInput{
 		PolicyName:     &name,
@@ -92,10 +151,71 @@ func (reconc *IAMReconciler) CreatePolicy(ctx context.Context, name string,
 		Description:    &descr,
 	}
 
-	createPolicyOutput, err := reconc.IAMClient.CreatePolicy(ctx, createPolicyInput)
-	if err != nil {
-		return "", fmt.Errorf("cannot creating iam policy %w", err)
+	_, err = reconc.IAMClient.CreatePolicy(ctx, createPolicyInput)
+	// check if role already exists, if error is not that it already exists
+	// there is other issue with creating role
+	var existsErr *types.EntityAlreadyExistsException
+	if !errors.As(err, &existsErr) {
+		return "", fmt.Errorf("cannot create iam policy %w", err)
 	}
 
-	return *createPolicyOutput.Policy.Arn, nil
+	return policyArn, nil
+}
+
+// RolePolicyBind bind policy to role
+func (reconc *IAMReconciler) RolePolicyBind(ctx context.Context, policyArn string, roleName string) error {
+	input := &iam.AttachRolePolicyInput{
+		PolicyArn: aws.String(policyArn),
+		RoleName:  aws.String(roleName),
+	}
+
+	_, err := reconc.IAMClient.AttachRolePolicy(ctx, input)
+	// TODO: check if already bound
+	if err != nil {
+		return fmt.Errorf("failed to bound policy to role: %w", err)
+	}
+
+	return nil
+}
+
+// UpdatePolicyDocument updates policy document for specified policy arn
+// and will delete old policy documents as part of operation
+func (reconc *IAMReconciler) UpdatePolicyDocument(ctx context.Context, policyARN string,
+	policyDoc *string) error {
+	input := &iam.CreatePolicyVersionInput{
+		PolicyArn:      &policyARN,
+		PolicyDocument: policyDoc,
+		SetAsDefault:   true,
+	}
+
+	_, err := reconc.IAMClient.CreatePolicyVersion(ctx, input)
+	if err != nil {
+		return fmt.Errorf("failed to create policy version: %w", err)
+	}
+
+	listInput := &iam.ListPolicyVersionsInput{
+		PolicyArn: &policyARN,
+	}
+
+	listResult, err := reconc.IAMClient.ListPolicyVersions(ctx, listInput)
+	if err != nil {
+		return fmt.Errorf("failed to list IAM policy versions: %w", err)
+	}
+
+	// Delete old policy versions (excluding the default version)
+	for _, version := range listResult.Versions {
+		if !version.IsDefaultVersion {
+			deleteInput := &iam.DeletePolicyVersionInput{
+				PolicyArn: &policyARN,
+				VersionId: version.VersionId,
+			}
+
+			_, err := reconc.IAMClient.DeletePolicyVersion(ctx, deleteInput)
+			if err != nil {
+				return fmt.Errorf("failed to delete IAM policy version %s: %w", *version.VersionId, err)
+			}
+		}
+	}
+
+	return nil
 }

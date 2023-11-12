@@ -35,7 +35,8 @@ spec:
           spec:
             description: RoleSpec defines the desired state of Role
             properties:
-              description:
+              oidcprovider:
+                description: provide oidc provider you created for eks cluster https://docs.aws.amazon.com/eks/latest/userguide/enable-iam-roles-for-service-accounts.html
                 type: string
               statements:
                 items:
@@ -57,19 +58,22 @@ spec:
                 minItems: 1
                 type: array
             required:
+            - oidcprovider
             - statements
             type: object
           status:
             description: RoleStatus defines the observed state of Role
             properties:
-              appliedpolicy:
-                description: stores marshaled last applied policy
+              appliedpolicydocument:
+                description: stores marshaled last applied policy document
                 type: string
+              bound:
+                type: boolean
               policyarn:
                 type: string
               reconciled:
                 type: boolean
-              role:
+              rolename:
                 description: stores role name which is sa + namespace + cluster name
                   + md5 hash
                 type: string
