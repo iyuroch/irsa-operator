@@ -7,7 +7,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.23.0
 	github.com/aws/aws-sdk-go-v2/service/iam v1.27.1
 	github.com/aws/aws-sdk-go-v2/service/sts v1.25.1
-	github.com/go-logr/logr v1.2.3
+	github.com/go-logr/logr v1.3.0
 	github.com/onsi/ginkgo/v2 v2.6.0
 	github.com/onsi/gomega v1.24.1
 	k8s.io/api v0.26.0
