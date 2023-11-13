@@ -21,22 +21,32 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/go-logr/logr"
+	authv1alpha1 "github.com/iyuroch/irsa-operator/api/v1alpha1"
+	"github.com/iyuroch/irsa-operator/controllers/aws"
+	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-
-	authv1alpha1 "github.com/iyuroch/irsa-operator/api/v1alpha1"
-	"github.com/iyuroch/irsa-operator/controllers/aws"
 )
 
 // RoleReconciler reconciles a Role object
 type RoleReconciler struct {
 	IAMReconciler aws.IIAMReconciler
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme       *runtime.Scheme
+	InstanceId   string
+	OIDCProvider string
 }
+
+const finalizer = "roles.auth.irsa.aws/finalizer"
+
+// how many of characters from resource uid to use during role and policy name generation
+const uidChars = 8
 
 //+kubebuilder:rbac:groups=auth.irsa.aws,resources=roles,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=auth.irsa.aws,resources=roles/status,verbs=get;update;patch
@@ -74,18 +84,7 @@ func (r *RoleReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		roleLog.Info("reconciliation run finished", "duration_seconds", time.Since(startTime).Seconds())
 	}()
 
-	// reconcile here
-	// compare status policy -> if
-	// if status policy != policy => CreatePolicy()
-	// generatedPolicy := aws.GeneratePolicy(role.Name, role.Namespace, description string, statementEntries *[]StatementEntry)
-	// if role.Status.AppliedPolicy !=
-	// if status do not have policy arn => create policy and record it in the status
-	// if status has policy arn but generated do not match => update policy
-	// if deletion => delete policy in aws
-
-	// https://groups.google.com/g/kubernetes-sig-architecture/c/mVGobfD4TpY/m/nkdbkX1iBwAJ
-	// TODO: fix me with object uid
-	awsResourceName := aws.GenerateResourceName(role.Name, role.Namespace, "uid-cluster")
+	awsResourceName := aws.GenerateResourceName(role.Name, role.Namespace, string(role.UID)[:uidChars]+r.InstanceId)
 	roleLog.Info(fmt.Sprintf("aws resource name: %s", awsResourceName))
 
 	roleLog.Info(fmt.Sprintf("policy statements: %s", role.Spec.Statements))
@@ -94,8 +93,30 @@ func (r *RoleReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	if err != nil {
 		return ctrl.Result{}, err
 	}
+	roleLog.Info(fmt.Sprintf("policy document: %s", *policyDoc))
+	var oidcProvider string
+	switch {
+	case role.Spec.OIDCProvider != "":
+		oidcProvider = role.Spec.OIDCProvider
+	case r.OIDCProvider != "":
+		oidcProvider = r.OIDCProvider
+	default:
+		return ctrl.Result{}, fmt.Errorf("there is no global or role-specific OIDC provider")
+	}
 
-	roleLog.Info(fmt.Sprintf("creating policy document: %s", *policyDoc))
+	// add finalizer if doesn't exist
+	if !controllerutil.ContainsFinalizer(role, finalizer) {
+		roleLog.Info("adding finalizer to the object")
+		controllerutil.AddFinalizer(role, finalizer)
+		if err := r.Update(ctx, role); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
+	// it's being deleted right now
+	if !role.ObjectMeta.DeletionTimestamp.IsZero() {
+		return r.delete(ctx, role, roleLog)
+	}
 
 	// it means that policy not created
 	if role.Status.PolicyARN == "" {
@@ -103,18 +124,12 @@ func (r *RoleReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		policyARN, err := r.IAMReconciler.CreatePolicy(ctx, awsResourceName, policyDoc)
 		if err != nil {
 			roleLog.Error(err, "failed to create policy")
-			// TODO: replace with reconcile calls
-			return ctrl.Result{}, err
-		}
-		// refreshing version here so less likely to conflict on update
-		if err := r.Get(ctx, req.NamespacedName, role); err != nil {
 			return ctrl.Result{}, err
 		}
 		role.Status.PolicyARN = policyARN
 		roleLog.Info("updating status with policyARN")
 		if err := r.Status().Update(ctx, role); err != nil {
 			roleLog.Error(err, "updating status failed")
-			// in some cases there will be conflict so requeue
 			return ctrl.Result{}, err
 		}
 	}
@@ -126,13 +141,9 @@ func (r *RoleReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 			roleLog.Error(err, "cannot update policy document")
 			return ctrl.Result{}, err
 		}
-		if err := r.Get(ctx, req.NamespacedName, role); err != nil {
-			return ctrl.Result{}, err
-		}
 		role.Status.AppliedPolicyDocument = *policyDoc
 		if err := r.Status().Update(ctx, role); err != nil {
 			roleLog.Error(err, "updating applied policy document failed")
-			// in some cases there will be conflict so requeue
 			return ctrl.Result{}, err
 		}
 	}
@@ -141,17 +152,12 @@ func (r *RoleReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	if role.Status.RoleName == "" {
 		roleLog.Info("creating role")
 		if r.IAMReconciler.CreateRole(ctx, role.Namespace, role.Name,
-			awsResourceName, role.Spec.OIDCProvider) != nil {
-			return ctrl.Result{}, err
-		}
-
-		if err := r.Get(ctx, req.NamespacedName, role); err != nil {
+			awsResourceName, oidcProvider) != nil {
 			return ctrl.Result{}, err
 		}
 		role.Status.RoleName = awsResourceName
 		if err := r.Status().Update(ctx, role); err != nil {
 			roleLog.Error(err, "updating rolename failed")
-			// in some cases there will be conflict so requeue
 			return ctrl.Result{}, err
 		}
 	}
@@ -162,15 +168,39 @@ func (r *RoleReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		if r.IAMReconciler.RolePolicyBind(ctx, role.Status.PolicyARN, role.Status.RoleName) != nil {
 			return ctrl.Result{}, err
 		}
-
-		// TODO: move this to separate function
-		if err := r.Get(ctx, req.NamespacedName, role); err != nil {
-			return ctrl.Result{}, err
-		}
 		role.Status.RolePolicyBound = true
 		if err := r.Status().Update(ctx, role); err != nil {
 			roleLog.Error(err, "updating role policy bind failed")
-			// in some cases there will be conflict so requeue
+			return ctrl.Result{}, err
+		}
+	}
+
+	roleLog.Info("checking service account created")
+	if !role.Status.ServiceAccountCreated {
+		roleLog.Info("creating service account")
+		awsAccountId, err := aws.GetAccountId()
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		roleArn := fmt.Sprintf("arn:aws:iam::%s:role/%s", awsAccountId, role.Status.RoleName)
+		sa := &corev1.ServiceAccount{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      role.Name,
+				Namespace: role.Namespace,
+				Annotations: map[string]string{
+					"eks.amazonaws.com/role-arn": roleArn,
+				},
+			},
+		}
+		if err := ctrl.SetControllerReference(role, sa, r.Scheme); err != nil {
+			return ctrl.Result{}, err
+		}
+		if err := r.Client.Create(ctx, sa); err != nil {
+			return ctrl.Result{}, err
+		}
+		role.Status.ServiceAccountCreated = true
+		if err := r.Status().Update(ctx, role); err != nil {
+			roleLog.Error(err, "updating service account status failed")
 			return ctrl.Result{}, err
 		}
 	}
@@ -178,9 +208,46 @@ func (r *RoleReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	return ctrl.Result{}, nil
 }
 
+func (r *RoleReconciler) delete(ctx context.Context, role *authv1alpha1.Role, roleLog logr.Logger) (result ctrl.Result, err error) {
+	roleLog.Info("deleting object")
+	if controllerutil.ContainsFinalizer(role, finalizer) {
+		roleLog.Info("deleting external dependencies")
+		if role.Status.RolePolicyBound {
+			err = r.IAMReconciler.DetachPolicyFromRole(ctx, role.Status.RoleName, role.Status.PolicyARN)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+		if role.Status.RoleName != "" {
+			roleLog.Info("deleting role")
+			err = r.IAMReconciler.DeleteRole(ctx, role.Status.RoleName)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+		if role.Status.PolicyARN != "" {
+			roleLog.Info("deleting policy")
+			err = r.IAMReconciler.DeletePolicy(ctx, role.Status.PolicyARN)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+
+		controllerutil.RemoveFinalizer(role, finalizer)
+		err := r.Update(ctx, role)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+
+		return ctrl.Result{}, nil
+	}
+	return ctrl.Result{}, nil
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *RoleReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&authv1alpha1.Role{}).
+		Owns(&corev1.ServiceAccount{}).
 		Complete(r)
 }

@@ -3,6 +3,6 @@ resources:
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 images:
-- digest: sha256:0e808244b23a9e423b282e842e1b513fefe8802c5d22474521e980e12f4fdeb1
+- digest: sha256:9308bbdb82d7662a1d560dbfbacd83e3ba9f950a2057a82f9db1eb36eadd68c2
   name: controller
   newName: ghcr.io/iyuroch/irsa-operator/irsa-operator-2dc55d191fb71b34151259765e531bfe

@@ -77,6 +77,8 @@ spec:
                 description: stores role name which is sa + namespace + cluster name
                   + md5 hash
                 type: string
+              serviceaccountcreated:
+                type: boolean
             type: object
         required:
         - spec

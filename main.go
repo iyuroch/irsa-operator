@@ -22,18 +22,17 @@ import (
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
-	_ "k8s.io/client-go/plugin/pkg/client/auth"
-
+	"github.com/aws/aws-sdk-go-v2/service/iam/types"
+	authv1alpha1 "github.com/iyuroch/irsa-operator/api/v1alpha1"
+	"github.com/iyuroch/irsa-operator/controllers"
 	"github.com/iyuroch/irsa-operator/controllers/aws"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
-
-	authv1alpha1 "github.com/iyuroch/irsa-operator/api/v1alpha1"
-	"github.com/iyuroch/irsa-operator/controllers"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -53,6 +52,10 @@ func main() {
 	var metricsAddr string
 	var enableLeaderElection bool
 	var probeAddr string
+	var instanceId string
+	var oidcprovider string
+	flag.StringVar(&oidcprovider, "oidcprovider", "", "OIDC provider for eks cluster")
+	flag.StringVar(&instanceId, "instance-id", "default", "Instance id of IRSA operator. Should be unique per cluster")
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
@@ -96,10 +99,23 @@ func main() {
 		os.Exit(1)
 	}
 
+	tags := []types.Tag{
+		{
+			Key:   aws.String("kubernetes.io/created-by"),
+			Value: aws.String("irsa-operator"),
+		},
+		{
+			Key:   aws.String("kubernetes.io/instance-id"),
+			Value: aws.String(instanceId),
+		},
+	}
+
 	if err = (&controllers.RoleReconciler{
 		Client:        mgr.GetClient(),
 		Scheme:        mgr.GetScheme(),
-		IAMReconciler: &aws.IAMReconciler{IAMClient: iamClient},
+		IAMReconciler: &aws.IAMReconciler{IAMClient: iamClient, Tags: tags},
+		InstanceId:    instanceId,
+		OIDCProvider:  oidcprovider,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Role")
 		os.Exit(1)

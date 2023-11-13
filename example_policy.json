@@ -1,0 +1,28 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Effect": "Allow",
+        "Action": [
+          "iam:CreatePolicy",
+          "iam:DeletePolicy",
+          "iam:GetPolicy",
+          "iam:DeletePolicyVersion",
+          "iam:CreatePolicyVersion",
+          "iam:ListPolicyVersions",
+          "iam:CreateRole",
+          "iam:AttachRolePolicy",
+          "iam:DeleteRole",
+          "iam:DetachRolePolicy",
+          "sts:GetCallerIdentity"
+        ],
+        "Resource": "*",
+        "Condition": {
+            "StringEquals": {
+              "aws:RequestTag/kubernetes.io/created-by": "irsa-operator"
+            }
+          }
+      }
+    ]
+  }
+  

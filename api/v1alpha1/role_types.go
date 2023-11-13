@@ -26,8 +26,9 @@ type RoleSpec struct {
 	// +kubebuilder:validation:MinItems:=1
 	Statements []aws.StatementEntry `json:"statements"`
 	// provide oidc provider you created for eks cluster
+	// takes higher priority than global you can set for operator through flag
 	// https://docs.aws.amazon.com/eks/latest/userguide/enable-iam-roles-for-service-accounts.html
-	OIDCProvider string `json:"oidcprovider"`
+	OIDCProvider string `json:"oidcprovider,omitempty"`
 }
 
 // RoleStatus defines the observed state of Role
@@ -36,9 +37,10 @@ type RoleStatus struct {
 	// stores marshaled last applied policy document
 	AppliedPolicyDocument string `json:"appliedpolicydocument,omitempty"`
 	// stores role name which is sa + namespace + cluster name + md5 hash
-	RoleName        string `json:"rolename,omitempty"`
-	PolicyARN       string `json:"policyarn,omitempty"`
-	RolePolicyBound bool   `json:"bound,omitempty"`
+	RoleName              string `json:"rolename,omitempty"`
+	PolicyARN             string `json:"policyarn,omitempty"`
+	RolePolicyBound       bool   `json:"bound,omitempty"`
+	ServiceAccountCreated bool   `json:"serviceaccountcreated,omitempty"`
 }
 
 //+kubebuilder:object:root=true

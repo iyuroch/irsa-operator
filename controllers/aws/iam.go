@@ -11,6 +11,9 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 )
 
+// String redeclare aws string to be used in parent module
+var String = aws.String
+
 // +kubebuilder:object:generate=true
 // +kubebuilder:validation:Required
 
@@ -40,11 +43,15 @@ type IIAMReconciler interface {
 	CreateRole(ctx context.Context,
 		namespace string, serviceAccount string, name string, oidcProvider string) error
 	RolePolicyBind(ctx context.Context, policyArn string, roleName string) error
+	DeleteRole(ctx context.Context, roleName string) error
+	DeletePolicy(ctx context.Context, policyArn string) error
+	DetachPolicyFromRole(ctx context.Context, roleName string, policyArn string) error
 }
 
 // IAMReconciler implement creation and deletion of the policy
 type IAMReconciler struct {
 	IAMClient IIAMClient
+	Tags      []types.Tag
 }
 
 const policyVersion = "2012-10-17"
@@ -119,6 +126,7 @@ func (reconc *IAMReconciler) CreateRole(ctx context.Context,
 	createRoleInput := &iam.CreateRoleInput{
 		AssumeRolePolicyDocument: aws.String(policyDocument),
 		RoleName:                 &name,
+		Tags:                     reconc.Tags,
 	}
 
 	_, err = reconc.IAMClient.CreateRole(ctx, createRoleInput)
@@ -127,6 +135,52 @@ func (reconc *IAMReconciler) CreateRole(ctx context.Context,
 	var existsErr *types.EntityAlreadyExistsException
 	if !errors.As(err, &existsErr) {
 		return err
+	}
+
+	return nil
+}
+
+// DeleteRole deletes role
+// return nothing if do not exist
+func (reconc *IAMReconciler) DeleteRole(ctx context.Context, roleName string) error {
+	deleteRoleInput := &iam.DeleteRoleInput{
+		RoleName: aws.String(roleName),
+	}
+
+	_, err := reconc.IAMClient.DeleteRole(ctx, deleteRoleInput)
+	if !errors.As(err, &notFound) {
+		return fmt.Errorf("cannot delete role: %w", err)
+	}
+
+	return nil
+}
+
+var notFound *types.NoSuchEntityException
+
+// DetachPolicyFromRole detaches policy from role
+func (reconc *IAMReconciler) DetachPolicyFromRole(ctx context.Context, roleName string, policyArn string) error {
+	detachRolePolicyInput := &iam.DetachRolePolicyInput{
+		RoleName:  aws.String(roleName),
+		PolicyArn: aws.String(policyArn),
+	}
+
+	_, err := reconc.IAMClient.DetachRolePolicy(ctx, detachRolePolicyInput)
+	if !errors.As(err, &notFound) {
+		return fmt.Errorf("cannot detach policy from role: %w", err)
+	}
+
+	return nil
+}
+
+// DeletePolicy deletes policy
+func (reconc *IAMReconciler) DeletePolicy(ctx context.Context, policyArn string) error {
+	deletePolicyInput := &iam.DeletePolicyInput{
+		PolicyArn: aws.String(policyArn),
+	}
+
+	_, err := reconc.IAMClient.DeletePolicy(ctx, deletePolicyInput)
+	if !errors.As(err, &notFound) {
+		return fmt.Errorf("cannot delete policy: %w", err)
 	}
 
 	return nil
