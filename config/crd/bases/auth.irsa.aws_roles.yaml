@@ -36,7 +36,9 @@ spec:
             description: RoleSpec defines the desired state of Role
             properties:
               oidcprovider:
-                description: provide oidc provider you created for eks cluster https://docs.aws.amazon.com/eks/latest/userguide/enable-iam-roles-for-service-accounts.html
+                description: provide oidc provider you created for eks cluster takes
+                  higher priority than global you can set for operator through flag
+                  https://docs.aws.amazon.com/eks/latest/userguide/enable-iam-roles-for-service-accounts.html
                 type: string
               statements:
                 items:
@@ -58,7 +60,6 @@ spec:
                 minItems: 1
                 type: array
             required:
-            - oidcprovider
             - statements
             type: object
           status:
