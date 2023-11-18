@@ -8,6 +8,8 @@ jobs:
   publish:
     name: Publish
     runs-on: ubuntu-latest
+    permissions:
+      packages: write
     steps:
       - uses: actions/setup-go@v4
         with:
