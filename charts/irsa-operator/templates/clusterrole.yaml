@@ -1,0 +1,42 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "irsa.fullname" . }}
+  labels:
+    {{- include "irsa.labels" . | nindent 4 }}
+  {{- with .Values.additionalAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "irsa.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ template "irsa.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "irsa.fullname" . }}
+  labels:
+    {{- include "irsa.labels" . | nindent 4 }}
+  {{- with .Values.additionalAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+rules:
+- apiGroups: ["auth.irsa.aws"]
+  resources: ["roles"]
+  verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+- apiGroups: ["auth.irsa.aws"]
+  resources: ["roles/finalizers"]
+  verbs: ["update"]
+- apiGroups: ["auth.irsa.aws"]
+  resources: ["roles/status"]
+  verbs: ["get", "patch", "update"]
+- apiGroups: [""]
+  resources: ["serviceaccounts"]
+  verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
