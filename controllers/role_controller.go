@@ -151,8 +151,9 @@ func (r *RoleReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	roleLog.Info("checking if role name matches state")
 	if role.Status.RoleName == "" {
 		roleLog.Info("creating role")
-		if r.IAMReconciler.CreateRole(ctx, role.Namespace, role.Name,
-			awsResourceName, oidcProvider) != nil {
+		if err := r.IAMReconciler.CreateRole(ctx, role.Namespace, role.Name,
+			awsResourceName, oidcProvider); err != nil {
+			roleLog.Error(err, "creating role failed")
 			return ctrl.Result{}, err
 		}
 		role.Status.RoleName = awsResourceName
