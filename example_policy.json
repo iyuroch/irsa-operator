@@ -14,15 +14,10 @@
           "iam:AttachRolePolicy",
           "iam:DeleteRole",
           "iam:DetachRolePolicy",
+          "iam:TagRole",
           "sts:GetCallerIdentity"
         ],
         "Resource": "*",
-        "Condition": {
-            "StringEquals": {
-              "aws:RequestTag/kubernetes.io/created-by": "irsa-operator"
-            }
-          }
-      }
     ]
   }
   
