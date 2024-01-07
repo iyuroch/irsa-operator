@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "irsa.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "irsa.labels" . | nindent 4 }}
+  {{- with .Values.additionalAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: http-metrics
+      port: {{ .Values.controller.metrics.port }}
+      targetPort: http-metrics
+      protocol: TCP
+  selector:
+    {{- include "irsa.selectorLabels" . | nindent 4 }}

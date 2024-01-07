@@ -1,0 +1,15 @@
+apiVersion: v2
+name: irsa-operator
+description: A Helm chart for irsa-operator, an open-source role mapped service account for Kubernetes
+type: application
+version: 0.0.1
+appVersion: 0.0.1
+keywords:
+  - cluster
+  - serviceaccount
+  - aws
+  - provision
+home: https://github.com/iyuroch/irsa-operator
+icon: https://github.com/iyuroch/irsa-operator/blob/39ba79502f39eb9d530085ab49505dc433722f25/irsa.png
+sources:
+  - https://github.com/iyuroch/irsa-operator
