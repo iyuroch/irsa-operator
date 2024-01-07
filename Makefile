@@ -125,7 +125,7 @@ run: manifests generate fmt vet ## Run a controller from your host.
 
 KO_DOCKER_REPO ?= ghcr.io/iyuroch/irsa-operator
 
-image: ## Build the Karpenter controller images using ko build
+image: ## Build the irsa operator images using ko build
 	$(eval CONTROLLER_IMG=$(shell KO_DOCKER_REPO="$(KO_DOCKER_REPO)" ko build ))
 	$(eval IMG_REPOSITORY=$(shell echo $(CONTROLLER_IMG) | cut -d "@" -f 1 | cut -d ":" -f 1))
 	$(eval IMG_TAG=$(shell echo $(CONTROLLER_IMG) | cut -d "@" -f 1 | cut -d ":" -f 2 -s))
