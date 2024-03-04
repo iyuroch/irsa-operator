@@ -3,7 +3,7 @@ module github.com/iyuroch/irsa-operator
 go 1.19
 
 require (
-	github.com/aws/aws-sdk-go v1.47.9
+	github.com/aws/aws-sdk-go v1.50.31
 	github.com/aws/aws-sdk-go-v2/config v1.25.0
 	github.com/aws/aws-sdk-go-v2/service/iam v1.27.1
 	github.com/aws/aws-sdk-go-v2/service/sts v1.25.1
